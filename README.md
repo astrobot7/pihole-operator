@@ -78,14 +78,24 @@ All carry `namespace` and `cluster` labels.
 
 Requires Kubernetes 1.31 or later (the CRDs use the CEL `isIP()` function) and Pi-hole 2025.x (v6). Pi-hole v5 is not supported.
 
+Each [release](https://github.com/astrobot7/pihole-operator/releases) publishes a multi-arch (amd64, arm64) image to `ghcr.io/astrobot7/pihole-operator` and an `install.yaml` with the CRDs, RBAC and the operator Deployment:
+
+```sh
+kubectl apply --server-side -f https://github.com/astrobot7/pihole-operator/releases/latest/download/install.yaml
+kubectl create namespace dns
+kubectl -n dns apply -k https://github.com/astrobot7/pihole-operator//config/samples
+```
+
+The `PiholeCluster` CRD embeds the full pod template schema and is larger than client-side `kubectl apply` allows, so `--server-side` is required. The Makefile targets already use it.
+
+To run your own build:
+
 ```sh
 make docker-build docker-push IMG=<registry>/pihole-operator:<tag>
 make deploy IMG=<registry>/pihole-operator:<tag>
-kubectl create namespace dns
-kubectl -n dns apply -k config/samples
 ```
 
-The `PiholeCluster` CRD embeds the full pod template schema and is larger than client-side `kubectl apply` allows, so apply the CRDs with `--server-side`. The Makefile targets already do.
+Pushing a `v*` tag runs the release workflow, which builds and pushes the image and attaches `install.yaml`, pinned to the image digest, to a GitHub release.
 
 ## Development
 

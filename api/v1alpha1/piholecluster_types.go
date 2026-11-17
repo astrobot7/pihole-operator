@@ -116,6 +116,11 @@ type ServiceSpec struct {
 	// annotations added to the Service, e.g. for MetalLB IP sharing.
 	// +optional
 	Annotations map[string]string `json:"annotations,omitempty"`
+
+	// labels added to the Service, e.g. svccontroller.k3s.cattle.io/lbpool to pick a
+	// k3s ServiceLB node pool. The operator's own labels win on conflict.
+	// +optional
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 // StorageSpec configures the /etc/pihole volume.

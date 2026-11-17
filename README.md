@@ -123,6 +123,7 @@ PIHOLE_TEST_URL=http://localhost:18080 PIHOLE_TEST_PASSWORD=pw go test ./interna
 - DHCP is not managed. Several replicas handing out leases would conflict.
 - Query logs and statistics are per replica. Use an exporter sidecar to collect them.
 - Behind a ClusterIP Service or `externalTrafficPolicy: Cluster`, Pi-hole may see node IPs instead of client IPs, which breaks per-client groups. Use a LoadBalancer with `externalTrafficPolicy: Local`.
+  On k3s, ServiceLB works for this: label the nodes that should answer with `svccontroller.k3s.cattle.io/enablelb=true`. To give several clusters their own nodes, label those nodes with `svccontroller.k3s.cattle.io/lbpool=<pool>` and set the same label in `dnsService.labels`.
 
 ## License
 

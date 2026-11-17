@@ -150,3 +150,29 @@ func TestNoPodTemplateIsUnchanged(t *testing.T) {
 		t.Fatal("default storage should create a PVC")
 	}
 }
+
+func TestMutateExposedLabels(t *testing.T) {
+	c := &piholev1alpha1.PiholeCluster{}
+	c.Name = "asia"
+	spec := piholev1alpha1.ServiceSpec{
+		Type: corev1.ServiceTypeLoadBalancer,
+		Labels: map[string]string{
+			"svccontroller.k3s.cattle.io/lbpool": "asia",
+			labelCluster:                         "other", // must not override the selector label
+		},
+	}
+	svc := &corev1.Service{}
+	mutateExposed(svc, c, spec, dnsPorts())
+
+	if got := svc.Labels["svccontroller.k3s.cattle.io/lbpool"]; got != "asia" {
+		t.Errorf("lbpool label = %q, want asia", got)
+	}
+	for k, v := range commonLabels(c) {
+		if svc.Labels[k] != v {
+			t.Errorf("label %s = %q, want operator value %q", k, svc.Labels[k], v)
+		}
+	}
+	if spec.Labels[labelCluster] != "other" {
+		t.Error("mutateExposed modified the spec's label map")
+	}
+}

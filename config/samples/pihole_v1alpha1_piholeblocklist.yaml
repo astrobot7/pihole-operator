@@ -1,0 +1,11 @@
+apiVersion: pihole.io/v1alpha1
+kind: PiholeBlocklist
+metadata:
+  name: ads
+spec:
+  clusterRef:
+    name: home
+  type: block
+  lists:
+    - url: https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/light-onlydomains.txt
+      comment: HaGeZi light

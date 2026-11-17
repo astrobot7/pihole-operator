@@ -1,0 +1,16 @@
+apiVersion: pihole.io/v1alpha1
+kind: PiholeDomainList
+metadata:
+  name: rules
+spec:
+  clusterRef:
+    name: home
+  entries:
+    - domain: blocked.example.com
+      action: deny
+    - domain: '(^|\.)doubleclick\.net$'
+      kind: regex
+      action: deny
+    - domain: s.youtube.com
+      action: allow
+      comment: keep watch history working

@@ -1,0 +1,15 @@
+apiVersion: pihole.io/v1alpha1
+kind: PiholeGroup
+metadata:
+  name: kids
+spec:
+  clusterRef:
+    name: home
+  description: Kids' devices
+  # Only lists and rules tagged with this group apply to these clients.
+  excludeFromDefault: true
+  clients:
+    - 192.168.1.50            # single address
+    - 192.168.20.0/24         # subnet
+    - "AA:BB:CC:DD:EE:FF"     # MAC address
+    - kids-tablet.home.lan    # hostname

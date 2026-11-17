@@ -1,0 +1,26 @@
+apiVersion: pihole.io/v1alpha1
+kind: PiholeCluster
+metadata:
+  name: home
+spec:
+  replicas: 2
+  timezone: UTC
+  upstreams:
+    - 1.1.1.1
+    - 9.9.9.9
+  ftl:
+    dns_dnssec: "true"
+  dnsService:
+    # LoadBalancer + Local keeps client IPs visible to Pi-hole.
+    # Needs MetalLB, Cilium LB-IPAM, kube-vip or a cloud LB.
+    type: ClusterIP
+  webService:
+    type: ClusterIP
+  storage:
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi

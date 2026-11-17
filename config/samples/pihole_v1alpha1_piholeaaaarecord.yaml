@@ -1,0 +1,9 @@
+apiVersion: pihole.io/v1alpha1
+kind: PiholeAAAARecord
+metadata:
+  name: nas-v6
+spec:
+  clusterRef:
+    name: home
+  hostname: nas.home.lan
+  ip: fd00:1::10

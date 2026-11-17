@@ -11,8 +11,10 @@ Pi-hole has no clustering of its own: each instance keeps its own gravity databa
 | `PiholeCluster` | `phc` | The deployment: replicas, image, upstream DNS, Services, storage, extra `pihole.toml` settings and an optional pod template |
 | `PiholeBlocklist` | `phbl` | Adlist subscriptions (block or allow), optionally scoped to groups |
 | `PiholeDomainList` | `phdl` | Exact or regex allow/deny rules |
-| `PiholeLocalRecord` | `phlr` | Local A/AAAA and CNAME records |
 | `PiholeGroup` | `phg` | A group and the clients (IP, CIDR, MAC, hostname, `:interface`) assigned to it |
+| `PiholeARecord` | `pha` | One local A record: hostname to IPv4 address |
+| `PiholeAAAARecord` | `phaaaa` | One local AAAA record: hostname to IPv6 address |
+| `PiholeCNAMERecord` | `phcname` | One local CNAME record: alias to target, with an optional TTL |
 
 Configuration objects point at their cluster with `spec.clusterRef.name` and must live in the same namespace.
 
@@ -51,6 +53,34 @@ More examples are in [`config/samples`](config/samples).
 ### Groups and clients
 
 Pi-hole keeps every client in the built-in `Default` group, so Default lists apply to everyone. A `PiholeGroup` with `excludeFromDefault: true` takes its clients out of Default, leaving only the lists and rules tagged with that group (via `spec.groups` on a blocklist or domain list). Name a group `Default` to assign clients to the built-in group explicitly.
+
+### Local DNS records
+
+Each record is its own object, with a kind per record type:
+
+```yaml
+apiVersion: pihole.io/v1alpha1
+kind: PiholeARecord
+metadata:
+  name: nas
+spec:
+  clusterRef: {name: home}
+  hostname: nas.home.lan
+  ip: 192.168.1.10
+---
+apiVersion: pihole.io/v1alpha1
+kind: PiholeCNAMERecord
+metadata:
+  name: files
+spec:
+  clusterRef: {name: home}
+  hostname: files.home.lan
+  target: nas.home.lan
+```
+
+Several A or AAAA records for the same hostname are all served, which gives round-robin answers. Hostnames are compared case-insensitively and without a trailing dot, and identical records from different objects collapse into one entry.
+
+DNS doesn't allow a CNAME next to other records for the same name, so a CNAME is left out when its hostname also has A/AAAA records, or when an object earlier by namespace/name already defines that alias with a different target. The losing object reports `Synced=False` with reason `Conflict` and a message naming the cause; every other record keeps working.
 
 ### Pod template
 
@@ -96,6 +126,14 @@ make deploy IMG=<registry>/pihole-operator:<tag>
 ```
 
 Pushing a `v*` tag runs the release workflow, which builds and pushes the image and attaches `install.yaml`, pinned to the image digest, to a GitHub release.
+
+### Upgrading from v0.1.0
+
+v0.1.0 had a single `PiholeLocalRecord` kind holding lists of A and CNAME records. It is replaced by `PiholeARecord`, `PiholeAAAARecord` and `PiholeCNAMERecord`. The operator remembers which records it applied, so once you create the new objects it swaps the old entries for them on every replica. Then remove the old kind:
+
+```sh
+kubectl delete crd piholelocalrecords.pihole.io
+```
 
 ## Development
 

@@ -39,7 +39,7 @@ resources:
     namespaced: true
   domain: io
   group: pihole
-  kind: PiholeLocalRecord
+  kind: PiholeGroup
   path: github.com/astrobot7/pihole-operator/api/v1alpha1
   version: v1alpha1
 - api:
@@ -47,7 +47,23 @@ resources:
     namespaced: true
   domain: io
   group: pihole
-  kind: PiholeGroup
+  kind: PiholeARecord
+  path: github.com/astrobot7/pihole-operator/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: io
+  group: pihole
+  kind: PiholeAAAARecord
+  path: github.com/astrobot7/pihole-operator/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: io
+  group: pihole
+  kind: PiholeCNAMERecord
   path: github.com/astrobot7/pihole-operator/api/v1alpha1
   version: v1alpha1
 version: "3"

@@ -1,0 +1,9 @@
+apiVersion: pihole.io/v1alpha1
+kind: PiholeCNAMERecord
+metadata:
+  name: files
+spec:
+  clusterRef:
+    name: home
+  hostname: files.home.lan
+  target: nas.home.lan

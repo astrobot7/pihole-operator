@@ -5,8 +5,10 @@ resources:
 - bases/pihole.io_piholeclusters.yaml
 - bases/pihole.io_piholeblocklists.yaml
 - bases/pihole.io_piholedomainlists.yaml
-- bases/pihole.io_piholelocalrecords.yaml
 - bases/pihole.io_piholegroups.yaml
+- bases/pihole.io_piholearecords.yaml
+- bases/pihole.io_piholeaaaarecords.yaml
+- bases/pihole.io_piholecnamerecords.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

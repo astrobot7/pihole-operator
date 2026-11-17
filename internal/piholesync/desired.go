@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/netip"
 	"regexp"
 	"slices"
 	"strings"
@@ -138,15 +139,12 @@ func sortedByName[T interface {
 // same list or domain appears in several objects, groups are unioned, the
 // entry is enabled if any object enables it, and the comment comes from the
 // first object by namespace/name.
-func Build(blocklists []v1alpha1.PiholeBlocklist, domainLists []v1alpha1.PiholeDomainList,
-	records []v1alpha1.PiholeLocalRecord, groups []v1alpha1.PiholeGroup) Desired {
-	bl := ptrs(blocklists)
-	dl := ptrs(domainLists)
-	lr := ptrs(records)
-	gs := ptrs(groups)
+func Build(in Inputs) (Desired, Conflicts) {
+	bl := ptrs(in.Blocklists)
+	dl := ptrs(in.DomainLists)
+	gs := ptrs(in.Groups)
 	sortedByName(bl)
 	sortedByName(dl)
-	sortedByName(lr)
 	sortedByName(gs)
 
 	var d Desired
@@ -212,23 +210,87 @@ func Build(blocklists []v1alpha1.PiholeBlocklist, domainLists []v1alpha1.PiholeD
 		d.Domains = append(d.Domains, *domains[k])
 	}
 
-	for _, r := range lr {
-		for _, a := range r.Spec.A {
-			d.Hosts = append(d.Hosts, a.IP+" "+a.Host)
+	conflicts := Conflicts{}
+	d.Hosts, d.CNAMEs = buildRecords(in, conflicts)
+	return d, conflicts
+}
+
+// Inputs are all configuration objects that reference one cluster.
+type Inputs struct {
+	Blocklists   []v1alpha1.PiholeBlocklist
+	DomainLists  []v1alpha1.PiholeDomainList
+	Groups       []v1alpha1.PiholeGroup
+	ARecords     []v1alpha1.PiholeARecord
+	AAAARecords  []v1alpha1.PiholeAAAARecord
+	CNAMERecords []v1alpha1.PiholeCNAMERecord
+}
+
+// Conflicts maps an object (ObjectKey) to why it was left out of Desired.
+type Conflicts map[string]string
+
+// ObjectKey identifies a configuration object in Conflicts.
+func ObjectKey(kind, namespace, name string) string { return kind + "/" + namespace + "/" + name }
+
+// normalizeHost lower-cases a hostname and drops a trailing dot; DNS names
+// are case-insensitive, and this makes duplicates and clashes detectable.
+func normalizeHost(h string) string {
+	return strings.ToLower(strings.TrimSuffix(strings.TrimSpace(h), "."))
+}
+
+// normalizeIP returns the canonical text form, so 2001:DB8::0:1 and
+// 2001:db8::1 are the same record.
+func normalizeIP(s string) string {
+	if a, err := netip.ParseAddr(strings.TrimSpace(s)); err == nil {
+		return a.String()
+	}
+	return s
+}
+
+// buildRecords turns record CRs into dns.hosts and dns.cnameRecords lines.
+// Identical A/AAAA records from several objects collapse into one. A CNAME is
+// left out, and reported in conflicts, when an earlier object (by
+// namespace/name) already claims the alias with a different target or TTL,
+// or when the alias also has A/AAAA records: DNS forbids a CNAME alongside
+// other data for the same name.
+func buildRecords(in Inputs, conflicts Conflicts) (hosts, cnames []string) {
+	addressed := map[string]bool{}
+	for _, r := range in.ARecords {
+		h := normalizeHost(r.Spec.Hostname)
+		addressed[h] = true
+		hosts = append(hosts, normalizeIP(r.Spec.IP)+" "+h)
+	}
+	for _, r := range in.AAAARecords {
+		h := normalizeHost(r.Spec.Hostname)
+		addressed[h] = true
+		hosts = append(hosts, normalizeIP(r.Spec.IP)+" "+h)
+	}
+
+	cs := ptrs(in.CNAMERecords)
+	sortedByName(cs)
+	type claim struct{ line, owner string }
+	claimed := map[string]claim{}
+	for _, r := range cs {
+		h := normalizeHost(r.Spec.Hostname)
+		line := h + "," + normalizeHost(r.Spec.Target)
+		if r.Spec.TTL != nil {
+			line += fmt.Sprintf(",%d", *r.Spec.TTL)
 		}
-		for _, c := range r.Spec.CNAME {
-			s := c.Host + "," + c.Target
-			if c.TTL > 0 {
-				s += fmt.Sprintf(",%d", c.TTL)
-			}
-			d.CNAMEs = append(d.CNAMEs, s)
+		key := ObjectKey("PiholeCNAMERecord", r.Namespace, r.Name)
+		switch prev, taken := claimed[h]; {
+		case addressed[h]:
+			conflicts[key] = fmt.Sprintf("%s also has A/AAAA records; a CNAME cannot coexist with them", h)
+		case taken && prev.line != line:
+			conflicts[key] = fmt.Sprintf("%s is already a CNAME defined by %s", h, prev.owner)
+		case !taken:
+			claimed[h] = claim{line: line, owner: r.Namespace + "/" + r.Name}
+			cnames = append(cnames, line)
 		}
 	}
-	slices.Sort(d.Hosts)
-	d.Hosts = slices.Compact(d.Hosts)
-	slices.Sort(d.CNAMEs)
-	d.CNAMEs = slices.Compact(d.CNAMEs)
-	return d
+
+	slices.Sort(hosts)
+	hosts = slices.Compact(hosts)
+	slices.Sort(cnames)
+	return hosts, cnames
 }
 
 var macRe = regexp.MustCompile(`^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$`)

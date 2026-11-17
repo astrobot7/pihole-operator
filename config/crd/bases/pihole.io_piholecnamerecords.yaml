@@ -4,21 +4,27 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.22.0
-  name: piholelocalrecords.pihole.io
+  name: piholecnamerecords.pihole.io
 spec:
   group: pihole.io
   names:
-    kind: PiholeLocalRecord
-    listKind: PiholeLocalRecordList
-    plural: piholelocalrecords
+    kind: PiholeCNAMERecord
+    listKind: PiholeCNAMERecordList
+    plural: piholecnamerecords
     shortNames:
-    - phlr
-    singular: piholelocalrecord
+    - phcname
+    singular: piholecnamerecord
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.clusterRef.name
       name: Cluster
+      type: string
+    - jsonPath: .spec.hostname
+      name: Hostname
+      type: string
+    - jsonPath: .spec.target
+      name: Target
       type: string
     - jsonPath: .status.conditions[?(@.type=="Synced")].status
       name: Synced
@@ -26,8 +32,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: PiholeLocalRecord declares local DNS and CNAME records for a
-          PiholeCluster.
+        description: PiholeCNAMERecord is one local CNAME record (alias to target).
         properties:
           apiVersion:
             description: |-
@@ -47,35 +52,10 @@ spec:
           metadata:
             type: object
           spec:
-            description: PiholeLocalRecordSpec defines the desired state of PiholeLocalRecord.
+            description: PiholeCNAMERecordSpec defines the desired state of PiholeCNAMERecord.
             properties:
-              a:
-                default: []
-                description: a records.
-                items:
-                  description: ARecord maps a host name to an address (A or AAAA).
-                  properties:
-                    host:
-                      description: host name.
-                      maxLength: 253
-                      minLength: 1
-                      type: string
-                    ip:
-                      description: ip address, IPv4 or IPv6.
-                      maxLength: 45
-                      type: string
-                      x-kubernetes-validations:
-                      - message: must be a valid IP address
-                        rule: isIP(self)
-                  required:
-                  - host
-                  - ip
-                  type: object
-                maxItems: 2000
-                type: array
               clusterRef:
-                description: clusterRef is the PiholeCluster these records are served
-                  by.
+                description: clusterRef is the PiholeCluster that serves this record.
                 properties:
                   name:
                     description: name of the PiholeCluster.
@@ -84,39 +64,33 @@ spec:
                 required:
                 - name
                 type: object
-              cname:
-                default: []
-                description: cname records.
-                items:
-                  description: CNAMERecord aliases a host name to a target.
-                  properties:
-                    host:
-                      description: host name of the alias.
-                      maxLength: 253
-                      minLength: 1
-                      type: string
-                    target:
-                      description: target the alias resolves to.
-                      maxLength: 253
-                      minLength: 1
-                      type: string
-                    ttl:
-                      description: ttl in seconds. Zero leaves it to Pi-hole.
-                      format: int32
-                      minimum: 0
-                      type: integer
-                  required:
-                  - host
-                  - target
-                  type: object
-                maxItems: 2000
-                type: array
+              hostname:
+                description: hostname is the alias, e.g. files.home.lan.
+                maxLength: 253
+                minLength: 1
+                pattern: ^[A-Za-z0-9_]([A-Za-z0-9_-]*[A-Za-z0-9_])?(\.[A-Za-z0-9_]([A-Za-z0-9_-]*[A-Za-z0-9_])?)*\.?$
+                type: string
+              target:
+                description: |-
+                  target is the name the alias resolves to. Pi-hole only answers for
+                  targets it knows: a local A/AAAA record or a cached upstream answer.
+                maxLength: 253
+                minLength: 1
+                pattern: ^[A-Za-z0-9_]([A-Za-z0-9_-]*[A-Za-z0-9_])?(\.[A-Za-z0-9_]([A-Za-z0-9_-]*[A-Za-z0-9_])?)*\.?$
+                type: string
+              ttl:
+                description: ttl in seconds. Unset leaves it to Pi-hole.
+                format: int32
+                minimum: 1
+                type: integer
             required:
             - clusterRef
+            - hostname
+            - target
             type: object
             x-kubernetes-validations:
-            - message: at least one a or cname record is required
-              rule: size(self.a) + size(self.cname) > 0
+            - message: a CNAME cannot point at itself
+              rule: self.hostname.lowerAscii() != self.target.lowerAscii()
           status:
             description: ConfigStatus is shared by the configuration CRDs (blocklists,
               domains, records).

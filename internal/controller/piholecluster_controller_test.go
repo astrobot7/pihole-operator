@@ -169,19 +169,26 @@ var _ = Describe("PiholeCluster controller", func() {
 				Clients:            []string{"10.20.0.0/24", "aa:bb:cc:dd:ee:ff"},
 			},
 		})).To(Succeed())
-		Expect(k8sClient.Create(ctx, &piholev1alpha1.PiholeLocalRecord{
-			ObjectMeta: metav1.ObjectMeta{Name: "home", Namespace: ns},
-			Spec: piholev1alpha1.PiholeLocalRecordSpec{
-				ClusterRef: piholev1alpha1.ClusterReference{Name: "lan"},
-				A:          []piholev1alpha1.ARecord{{Host: "nas.lan", IP: "10.0.0.5"}},
-			},
+		lanRef := piholev1alpha1.ClusterReference{Name: "lan"}
+		Expect(k8sClient.Create(ctx, &piholev1alpha1.PiholeARecord{
+			ObjectMeta: metav1.ObjectMeta{Name: "nas", Namespace: ns},
+			Spec:       piholev1alpha1.PiholeARecordSpec{ClusterRef: lanRef, Hostname: "nas.lan", IP: "10.0.0.5"},
+		})).To(Succeed())
+		Expect(k8sClient.Create(ctx, &piholev1alpha1.PiholeAAAARecord{
+			ObjectMeta: metav1.ObjectMeta{Name: "nas-v6", Namespace: ns},
+			Spec:       piholev1alpha1.PiholeAAAARecordSpec{ClusterRef: lanRef, Hostname: "nas.lan", IP: "fd00::5"},
+		})).To(Succeed())
+		Expect(k8sClient.Create(ctx, &piholev1alpha1.PiholeCNAMERecord{
+			ObjectMeta: metav1.ObjectMeta{Name: "files", Namespace: ns},
+			Spec:       piholev1alpha1.PiholeCNAMERecordSpec{ClusterRef: lanRef, Hostname: "files.lan", Target: "nas.lan"},
 		})).To(Succeed())
 
 		for _, f := range []*fakepihole.Pihole{f0, f1} {
 			Eventually(func(g Gomega) {
 				s := f.Snapshot()
 				g.Expect(s.Domains).To(HaveLen(1))
-				g.Expect(s.Hosts).To(Equal([]string{"10.0.0.5 nas.lan"}))
+				g.Expect(s.Hosts).To(Equal([]string{"10.0.0.5 nas.lan", "fd00::5 nas.lan"}))
+				g.Expect(s.CNAMEs).To(Equal([]string{"files.lan,nas.lan"}))
 				g.Expect(addresses(s)).To(ContainElement("https://lists.example/ads.txt"))
 				g.Expect(s.GravityRuns).To(Equal(1), "gravity runs once per pod after lists change")
 				g.Expect(s.Clients).To(HaveLen(2))
@@ -231,6 +238,21 @@ var _ = Describe("PiholeCluster controller", func() {
 			return ""
 		}, timeout, interval).Should(Equal(metav1.ConditionTrue))
 
+		By("reporting a CNAME that clashes with an existing one")
+		Expect(k8sClient.Create(ctx, &piholev1alpha1.PiholeCNAMERecord{
+			ObjectMeta: metav1.ObjectMeta{Name: "zz-files", Namespace: ns},
+			Spec:       piholev1alpha1.PiholeCNAMERecordSpec{ClusterRef: lanRef, Hostname: "files.lan", Target: "other.lan"},
+		})).To(Succeed())
+		Eventually(func() string {
+			var got piholev1alpha1.PiholeCNAMERecord
+			_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "zz-files"}, &got)
+			if c := meta.FindStatusCondition(got.Status.Conditions, piholev1alpha1.ConditionSynced); c != nil && c.Status == metav1.ConditionFalse {
+				return c.Reason + ": " + c.Message
+			}
+			return ""
+		}, timeout, interval).Should(And(HavePrefix("Conflict: "), ContainSubstring("sync/files")))
+		Expect(f0.Snapshot().CNAMEs).To(Equal([]string{"files.lan,nas.lan"}), "the losing CNAME must not reach Pi-hole")
+
 		By("repairing drift made in the web UI")
 		f1.Mutate(func(s *fakepihole.State) { s.Domains = nil })
 		Eventually(func() int { return len(f1.Snapshot().Domains) }, timeout, interval).Should(Equal(1))
@@ -269,6 +291,27 @@ var _ = Describe("PiholeCluster controller", func() {
 		Expect(tpl.Annotations).To(HaveKeyWithValue("prometheus.io/scrape", "true"))
 		Expect(tpl.Spec.PriorityClassName).To(Equal("system-cluster-critical"))
 		Expect(tpl.Spec.Containers).To(HaveLen(2))
+	})
+
+	It("rejects records that fail validation", func() {
+		ns := "default"
+		ref := piholev1alpha1.ClusterReference{Name: "any"}
+		Expect(k8sClient.Create(ctx, &piholev1alpha1.PiholeARecord{
+			ObjectMeta: metav1.ObjectMeta{Name: "v6-in-a", Namespace: ns},
+			Spec:       piholev1alpha1.PiholeARecordSpec{ClusterRef: ref, Hostname: "x.lan", IP: "fd00::1"},
+		})).To(MatchError(ContainSubstring("must be an IPv4 address")))
+		Expect(k8sClient.Create(ctx, &piholev1alpha1.PiholeAAAARecord{
+			ObjectMeta: metav1.ObjectMeta{Name: "v4-in-aaaa", Namespace: ns},
+			Spec:       piholev1alpha1.PiholeAAAARecordSpec{ClusterRef: ref, Hostname: "x.lan", IP: "10.0.0.1"},
+		})).To(MatchError(ContainSubstring("must be an IPv6 address")))
+		Expect(k8sClient.Create(ctx, &piholev1alpha1.PiholeCNAMERecord{
+			ObjectMeta: metav1.ObjectMeta{Name: "loop", Namespace: ns},
+			Spec:       piholev1alpha1.PiholeCNAMERecordSpec{ClusterRef: ref, Hostname: "A.lan", Target: "a.lan"},
+		})).To(MatchError(ContainSubstring("cannot point at itself")))
+		Expect(k8sClient.Create(ctx, &piholev1alpha1.PiholeARecord{
+			ObjectMeta: metav1.ObjectMeta{Name: "bad-host", Namespace: ns},
+			Spec:       piholev1alpha1.PiholeARecordSpec{ClusterRef: ref, Hostname: "has space.lan", IP: "10.0.0.1"},
+		})).To(MatchError(ContainSubstring("spec.hostname")))
 	})
 
 	It("reports a missing admin secret", func() {

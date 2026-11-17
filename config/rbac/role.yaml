@@ -48,11 +48,13 @@ rules:
 - apiGroups:
   - pihole.io
   resources:
+  - piholeaaaarecords
+  - piholearecords
   - piholeblocklists
   - piholeclusters
+  - piholecnamerecords
   - piholedomainlists
   - piholegroups
-  - piholelocalrecords
   verbs:
   - create
   - delete
@@ -64,11 +66,13 @@ rules:
 - apiGroups:
   - pihole.io
   resources:
+  - piholeaaaarecords/status
+  - piholearecords/status
   - piholeblocklists/status
   - piholeclusters/status
+  - piholecnamerecords/status
   - piholedomainlists/status
   - piholegroups/status
-  - piholelocalrecords/status
   verbs:
   - get
   - patch

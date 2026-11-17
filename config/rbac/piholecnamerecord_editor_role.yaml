@@ -11,12 +11,12 @@ metadata:
   labels:
     app.kubernetes.io/name: pihole-operator
     app.kubernetes.io/managed-by: kustomize
-  name: piholelocalrecord-editor-role
+  name: piholecnamerecord-editor-role
 rules:
 - apiGroups:
   - pihole.io
   resources:
-  - piholelocalrecords
+  - piholecnamerecords
   verbs:
   - create
   - delete
@@ -28,6 +28,6 @@ rules:
 - apiGroups:
   - pihole.io
   resources:
-  - piholelocalrecords/status
+  - piholecnamerecords/status
   verbs:
   - get

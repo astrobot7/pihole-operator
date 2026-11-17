@@ -16,38 +16,43 @@ import (
 
 func meta(name string) metav1.ObjectMeta { return metav1.ObjectMeta{Namespace: "dns", Name: name} }
 
+// build is Build for tests that do not care about conflicts.
+func build(in Inputs) Desired {
+	d, _ := Build(in)
+	return d
+}
+
 func sample() Desired {
-	return Build(
-		[]v1alpha1.PiholeBlocklist{{
+	return build(Inputs{
+		Blocklists: []v1alpha1.PiholeBlocklist{{
 			ObjectMeta: meta("ads"),
 			Spec: v1alpha1.PiholeBlocklistSpec{Lists: []v1alpha1.ListSource{
 				{URL: "https://lists/a.txt"}, {URL: "https://lists/b.txt", Enabled: new(false), Comment: "b"},
 			}},
 		}},
-		[]v1alpha1.PiholeDomainList{{
+		DomainLists: []v1alpha1.PiholeDomainList{{
 			ObjectMeta: meta("rules"),
 			Spec: v1alpha1.PiholeDomainListSpec{Groups: []string{"kids"}, Entries: []v1alpha1.DomainEntry{
 				{Domain: "Tracker.Example.", Action: v1alpha1.DomainDeny},
 				{Domain: `^ads\.`, Kind: v1alpha1.DomainKindRegex, Action: v1alpha1.DomainDeny},
 			}},
 		}},
-		[]v1alpha1.PiholeLocalRecord{{
-			ObjectMeta: meta("lan"),
-			Spec: v1alpha1.PiholeLocalRecordSpec{
-				A:     []v1alpha1.ARecord{{Host: "nas.lan", IP: "10.0.0.5"}},
-				CNAME: []v1alpha1.CNAMERecord{{Host: "files.lan", Target: "nas.lan", TTL: 300}},
-			},
+		ARecords: []v1alpha1.PiholeARecord{{
+			ObjectMeta: meta("nas"),
+			Spec:       v1alpha1.PiholeARecordSpec{Hostname: "nas.lan", IP: "10.0.0.5"},
 		}},
-		nil,
-	)
+		CNAMERecords: []v1alpha1.PiholeCNAMERecord{{
+			ObjectMeta: meta("files"),
+			Spec:       v1alpha1.PiholeCNAMERecordSpec{Hostname: "files.lan", Target: "nas.lan", TTL: new(int32(300))},
+		}},
+	})
 }
 
 func TestBuildMergesAndNormalises(t *testing.T) {
-	d := Build(
-		[]v1alpha1.PiholeBlocklist{
-			{ObjectMeta: meta("b"), Spec: v1alpha1.PiholeBlocklistSpec{Groups: []string{"kids"}, Lists: []v1alpha1.ListSource{{URL: "https://x", Enabled: new(true)}}}},
-			{ObjectMeta: meta("a"), Spec: v1alpha1.PiholeBlocklistSpec{Lists: []v1alpha1.ListSource{{URL: "https://x", Enabled: new(false), Comment: "first"}}}},
-		}, nil, nil, nil)
+	d := build(Inputs{Blocklists: []v1alpha1.PiholeBlocklist{
+		{ObjectMeta: meta("b"), Spec: v1alpha1.PiholeBlocklistSpec{Groups: []string{"kids"}, Lists: []v1alpha1.ListSource{{URL: "https://x", Enabled: new(true)}}}},
+		{ObjectMeta: meta("a"), Spec: v1alpha1.PiholeBlocklistSpec{Lists: []v1alpha1.ListSource{{URL: "https://x", Enabled: new(false), Comment: "first"}}}},
+	}})
 	if len(d.Lists) != 1 {
 		t.Fatalf("want 1 merged list, got %+v", d.Lists)
 	}
@@ -226,7 +231,7 @@ func clientGroups(d Desired) map[string][]string {
 }
 
 func TestBuildGroupsAndClients(t *testing.T) {
-	d := Build(nil, nil, nil, groupsSample())
+	d := build(Inputs{Groups: groupsSample()})
 
 	if len(d.GroupDefs) != 2 || d.GroupDefs[0].Name != "guests" || d.GroupDefs[0].Enabled || !d.GroupDefs[1].Enabled {
 		t.Fatalf("group defs = %+v (Default must not be declared, guests disabled)", d.GroupDefs)
@@ -258,7 +263,7 @@ func TestConvergeGroupsAndClients(t *testing.T) {
 	f.Mutate(func(s *fakepihole.State) {
 		s.Groups = append(s.Groups, piholeapi.Group{Name: "handmade", Comment: "mine", Enabled: true, ID: 5})
 	})
-	d := Build(nil, nil, nil, groupsSample())
+	d := build(Inputs{Groups: groupsSample()})
 	if _, err := Converge(ctx, f, d, Options{}); err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +288,7 @@ func TestConvergeGroupsAndClients(t *testing.T) {
 	}
 
 	// Drop the kids group: its managed group and exclusive clients go, hand-made group stays.
-	d = Build(nil, nil, nil, groupsSample()[1:])
+	d = build(Inputs{Groups: groupsSample()[1:]})
 	if _, err := Converge(ctx, f, d, Options{}); err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +315,7 @@ func TestConvergeGroupsContract(t *testing.T) {
 	ctx := context.Background()
 	c := piholeapi.New(base, os.Getenv("PIHOLE_TEST_PASSWORD"), nil)
 	defer func() { _ = c.Logout(ctx) }()
-	d := Build(nil, nil, nil, groupsSample())
+	d := build(Inputs{Groups: groupsSample()})
 	if _, err := Converge(ctx, c, d, Options{}); err != nil {
 		t.Fatalf("converge: %v", err)
 	}
@@ -331,5 +336,47 @@ func TestConvergeGroupsContract(t *testing.T) {
 		if strings.Contains(x.Comment, Marker) {
 			t.Fatalf("managed client left behind: %+v", x)
 		}
+	}
+}
+
+func TestBuildRecords(t *testing.T) {
+	a := func(name, host, ip string) v1alpha1.PiholeARecord {
+		return v1alpha1.PiholeARecord{ObjectMeta: meta(name), Spec: v1alpha1.PiholeARecordSpec{Hostname: host, IP: ip}}
+	}
+	cname := func(name, host, target string) v1alpha1.PiholeCNAMERecord {
+		return v1alpha1.PiholeCNAMERecord{ObjectMeta: meta(name), Spec: v1alpha1.PiholeCNAMERecordSpec{Hostname: host, Target: target}}
+	}
+	d, conflicts := Build(Inputs{
+		ARecords: []v1alpha1.PiholeARecord{
+			a("nas-1", "NAS.lan.", "10.0.0.5"),
+			a("nas-2", "nas.lan", "10.0.0.6"),   // round robin: second address for the same name
+			a("nas-dup", "nas.lan", "10.0.0.5"), // identical to nas-1, collapses
+		},
+		AAAARecords: []v1alpha1.PiholeAAAARecord{{
+			ObjectMeta: meta("nas-v6"),
+			Spec:       v1alpha1.PiholeAAAARecordSpec{Hostname: "nas.lan", IP: "2001:DB8:0::5"},
+		}},
+		CNAMERecords: []v1alpha1.PiholeCNAMERecord{
+			cname("files", "files.lan", "nas.lan"),
+			cname("files-same", "FILES.lan", "nas.lan"), // same record, no conflict
+			cname("z-files", "files.lan", "other.lan"),  // loses to "files" by name
+			cname("nas-alias", "nas.lan", "box.lan"),    // nas.lan has A/AAAA records
+		},
+	})
+	wantHosts := []string{"10.0.0.5 nas.lan", "10.0.0.6 nas.lan", "2001:db8::5 nas.lan"}
+	if !slices.Equal(d.Hosts, wantHosts) {
+		t.Errorf("hosts = %v, want %v", d.Hosts, wantHosts)
+	}
+	if !slices.Equal(d.CNAMEs, []string{"files.lan,nas.lan"}) {
+		t.Errorf("cnames = %v", d.CNAMEs)
+	}
+	if len(conflicts) != 2 {
+		t.Fatalf("conflicts = %v, want z-files and nas-alias", conflicts)
+	}
+	if msg := conflicts[ObjectKey("PiholeCNAMERecord", "dns", "z-files")]; !strings.Contains(msg, "dns/files") {
+		t.Errorf("z-files conflict should name the winning object, got %q", msg)
+	}
+	if msg := conflicts[ObjectKey("PiholeCNAMERecord", "dns", "nas-alias")]; !strings.Contains(msg, "A/AAAA") {
+		t.Errorf("nas-alias conflict = %q", msg)
 	}
 }

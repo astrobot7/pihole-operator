@@ -66,8 +66,8 @@ func (r *PiholeClusterReconciler) event(c *piholev1alpha1.PiholeCluster, related
 	}
 }
 
-// +kubebuilder:rbac:groups=pihole.io,resources=piholeclusters;piholeblocklists;piholedomainlists;piholelocalrecords;piholegroups,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=pihole.io,resources=piholeclusters/status;piholeblocklists/status;piholedomainlists/status;piholelocalrecords/status;piholegroups/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=pihole.io,resources=piholeclusters;piholeblocklists;piholedomainlists;piholegroups;piholearecords;piholeaaaarecords;piholecnamerecords,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=pihole.io,resources=piholeclusters/status;piholeblocklists/status;piholedomainlists/status;piholegroups/status;piholearecords/status;piholeaaaarecords/status;piholecnamerecords/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=pihole.io,resources=piholeclusters/finalizers,verbs=update
@@ -109,7 +109,7 @@ func (r *PiholeClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
-	desired, children, err := r.desiredState(ctx, &c)
+	desired, conflicts, children, err := r.desiredState(ctx, &c)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -147,7 +147,7 @@ func (r *PiholeClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err := r.patchStatus(ctx, orig, &c); err != nil {
 		return ctrl.Result{}, err
 	}
-	if err := r.updateChildren(ctx, children, fullySynced, msg); err != nil {
+	if err := r.updateChildren(ctx, children, conflicts, fullySynced, msg); err != nil {
 		log.Error(err, "updating child status")
 	}
 
@@ -228,67 +228,61 @@ func (r *PiholeClusterReconciler) ensureWorkload(ctx context.Context, c *piholev
 	return nil
 }
 
-// childObject gives uniform access to the config CRs' status.
-type childObject interface {
-	object() client.Object
-	status() *piholev1alpha1.ConfigStatus
+// childObject is a configuration CR that references the cluster, with
+// uniform access to its status.
+type childObject struct {
+	obj    client.Object
+	status *piholev1alpha1.ConfigStatus
+	// key matches piholesync.ObjectKey, to look up conflicts.
+	key string
 }
 
-type blocklist struct {
-	*piholev1alpha1.PiholeBlocklist
-}
-type domainList struct {
-	*piholev1alpha1.PiholeDomainList
-}
-type localRecord struct {
-	*piholev1alpha1.PiholeLocalRecord
+func child(kind string, obj client.Object, st *piholev1alpha1.ConfigStatus) childObject {
+	return childObject{obj: obj, status: st, key: piholesync.ObjectKey(kind, obj.GetNamespace(), obj.GetName())}
 }
 
-type group struct {
-	*piholev1alpha1.PiholeGroup
-}
-
-func (b blocklist) status() *piholev1alpha1.ConfigStatus   { return &b.Status }
-func (d domainList) status() *piholev1alpha1.ConfigStatus  { return &d.Status }
-func (l localRecord) status() *piholev1alpha1.ConfigStatus { return &l.Status }
-func (b blocklist) object() client.Object                  { return b.PiholeBlocklist }
-func (d domainList) object() client.Object                 { return d.PiholeDomainList }
-func (l localRecord) object() client.Object                { return l.PiholeLocalRecord }
-func (g group) status() *piholev1alpha1.ConfigStatus       { return &g.Status }
-func (g group) object() client.Object                      { return g.PiholeGroup }
-
-func (r *PiholeClusterReconciler) desiredState(ctx context.Context, c *piholev1alpha1.PiholeCluster) (piholesync.Desired, []childObject, error) {
+func (r *PiholeClusterReconciler) desiredState(ctx context.Context, c *piholev1alpha1.PiholeCluster) (
+	piholesync.Desired, piholesync.Conflicts, []childObject, error) {
 	opts := []client.ListOption{client.InNamespace(c.Namespace), client.MatchingFields{clusterRefIndex: c.Name}}
-	var bl piholev1alpha1.PiholeBlocklistList
-	var dl piholev1alpha1.PiholeDomainListList
-	var lr piholev1alpha1.PiholeLocalRecordList
-	var gl piholev1alpha1.PiholeGroupList
-	if err := r.List(ctx, &gl, opts...); err != nil {
-		return piholesync.Desired{}, nil, err
+	var (
+		bl   piholev1alpha1.PiholeBlocklistList
+		dl   piholev1alpha1.PiholeDomainListList
+		gl   piholev1alpha1.PiholeGroupList
+		al   piholev1alpha1.PiholeARecordList
+		aaal piholev1alpha1.PiholeAAAARecordList
+		cl   piholev1alpha1.PiholeCNAMERecordList
+	)
+	for _, l := range []client.ObjectList{&bl, &dl, &gl, &al, &aaal, &cl} {
+		if err := r.List(ctx, l, opts...); err != nil {
+			return piholesync.Desired{}, nil, nil, err
+		}
 	}
-	if err := r.List(ctx, &bl, opts...); err != nil {
-		return piholesync.Desired{}, nil, err
-	}
-	if err := r.List(ctx, &dl, opts...); err != nil {
-		return piholesync.Desired{}, nil, err
-	}
-	if err := r.List(ctx, &lr, opts...); err != nil {
-		return piholesync.Desired{}, nil, err
-	}
+
 	var children []childObject
 	for i := range bl.Items {
-		children = append(children, blocklist{&bl.Items[i]})
+		children = append(children, child("PiholeBlocklist", &bl.Items[i], &bl.Items[i].Status))
 	}
 	for i := range dl.Items {
-		children = append(children, domainList{&dl.Items[i]})
-	}
-	for i := range lr.Items {
-		children = append(children, localRecord{&lr.Items[i]})
+		children = append(children, child("PiholeDomainList", &dl.Items[i], &dl.Items[i].Status))
 	}
 	for i := range gl.Items {
-		children = append(children, group{&gl.Items[i]})
+		children = append(children, child("PiholeGroup", &gl.Items[i], &gl.Items[i].Status))
 	}
-	return piholesync.Build(bl.Items, dl.Items, lr.Items, gl.Items), children, nil
+	for i := range al.Items {
+		children = append(children, child("PiholeARecord", &al.Items[i], &al.Items[i].Status))
+	}
+	for i := range aaal.Items {
+		children = append(children, child("PiholeAAAARecord", &aaal.Items[i], &aaal.Items[i].Status))
+	}
+	for i := range cl.Items {
+		children = append(children, child("PiholeCNAMERecord", &cl.Items[i], &cl.Items[i].Status))
+	}
+
+	desired, conflicts := piholesync.Build(piholesync.Inputs{
+		Blocklists: bl.Items, DomainLists: dl.Items, Groups: gl.Items,
+		ARecords: al.Items, AAAARecords: aaal.Items, CNAMERecords: cl.Items,
+	})
+	return desired, conflicts, children, nil
 }
 
 // syncPods converges every ready pod and then rebuilds gravity on at most one
@@ -446,18 +440,25 @@ func syncMessage(c *piholev1alpha1.PiholeCluster, want int32) string {
 	return truncate(head+"; "+strings.Join(parts, "; "), 1024)
 }
 
-func (r *PiholeClusterReconciler) updateChildren(ctx context.Context, children []childObject, synced bool, msg string) error {
+// updateChildren sets each child's Synced condition: the cluster-wide sync
+// state, or False with reason Conflict when Build left the object out.
+func (r *PiholeClusterReconciler) updateChildren(ctx context.Context, children []childObject,
+	conflicts piholesync.Conflicts, synced bool, msg string) error {
 	var errs []error
 	for _, child := range children {
-		ch := child.object()
+		ch := child.obj
 		before := ch.DeepCopyObject().(client.Object)
-		st := child.status()
+		st := child.status
 		changed := st.ObservedGeneration != ch.GetGeneration()
 		st.ObservedGeneration = ch.GetGeneration()
-		if meta.SetStatusCondition(&st.Conditions, metav1.Condition{
+		cond := metav1.Condition{
 			Type: piholev1alpha1.ConditionSynced, Status: boolStatus(synced),
 			Reason: ternary(synced, "Applied", "Pending"), Message: msg, ObservedGeneration: ch.GetGeneration(),
-		}) {
+		}
+		if why, ok := conflicts[child.key]; ok {
+			cond.Status, cond.Reason, cond.Message = metav1.ConditionFalse, "Conflict", why
+		}
+		if meta.SetStatusCondition(&st.Conditions, cond) {
 			changed = true
 		}
 		if !changed {
@@ -506,7 +507,9 @@ func (r *PiholeClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	ctx := context.Background()
 	blRef := func(o *piholev1alpha1.PiholeBlocklist) string { return o.Spec.ClusterRef.Name }
 	dlRef := func(o *piholev1alpha1.PiholeDomainList) string { return o.Spec.ClusterRef.Name }
-	lrRef := func(o *piholev1alpha1.PiholeLocalRecord) string { return o.Spec.ClusterRef.Name }
+	aRef := func(o *piholev1alpha1.PiholeARecord) string { return o.Spec.ClusterRef.Name }
+	aaaaRef := func(o *piholev1alpha1.PiholeAAAARecord) string { return o.Spec.ClusterRef.Name }
+	cnameRef := func(o *piholev1alpha1.PiholeCNAMERecord) string { return o.Spec.ClusterRef.Name }
 	grRef := func(o *piholev1alpha1.PiholeGroup) string { return o.Spec.ClusterRef.Name }
 	if err := indexClusterRef(ctx, mgr, &piholev1alpha1.PiholeGroup{}, grRef); err != nil {
 		return err
@@ -517,7 +520,13 @@ func (r *PiholeClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err := indexClusterRef(ctx, mgr, &piholev1alpha1.PiholeDomainList{}, dlRef); err != nil {
 		return err
 	}
-	if err := indexClusterRef(ctx, mgr, &piholev1alpha1.PiholeLocalRecord{}, lrRef); err != nil {
+	if err := indexClusterRef(ctx, mgr, &piholev1alpha1.PiholeARecord{}, aRef); err != nil {
+		return err
+	}
+	if err := indexClusterRef(ctx, mgr, &piholev1alpha1.PiholeAAAARecord{}, aaaaRef); err != nil {
+		return err
+	}
+	if err := indexClusterRef(ctx, mgr, &piholev1alpha1.PiholeCNAMERecord{}, cnameRef); err != nil {
 		return err
 	}
 
@@ -529,7 +538,9 @@ func (r *PiholeClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&policyv1.PodDisruptionBudget{}).
 		Watches(&piholev1alpha1.PiholeBlocklist{}, enqueueCluster(blRef)).
 		Watches(&piholev1alpha1.PiholeDomainList{}, enqueueCluster(dlRef)).
-		Watches(&piholev1alpha1.PiholeLocalRecord{}, enqueueCluster(lrRef)).
+		Watches(&piholev1alpha1.PiholeARecord{}, enqueueCluster(aRef)).
+		Watches(&piholev1alpha1.PiholeAAAARecord{}, enqueueCluster(aaaaRef)).
+		Watches(&piholev1alpha1.PiholeCNAMERecord{}, enqueueCluster(cnameRef)).
 		Watches(&piholev1alpha1.PiholeGroup{}, enqueueCluster(grRef)).
 		// Pod readiness changes and restarts trigger a sync so new replicas converge quickly.
 		Watches(&corev1.Pod{}, enqueueCluster(func(o *corev1.Pod) string { return o.Labels[labelCluster] })).

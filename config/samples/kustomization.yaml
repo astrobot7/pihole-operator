@@ -3,6 +3,8 @@ resources:
 - pihole_v1alpha1_piholecluster.yaml
 - pihole_v1alpha1_piholeblocklist.yaml
 - pihole_v1alpha1_piholedomainlist.yaml
-- pihole_v1alpha1_piholelocalrecord.yaml
 - pihole_v1alpha1_piholegroup.yaml
+- pihole_v1alpha1_piholearecord.yaml
+- pihole_v1alpha1_piholeaaaarecord.yaml
+- pihole_v1alpha1_piholecnamerecord.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

@@ -22,12 +22,18 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the pihole-operator itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- piholecnamerecord_admin_role.yaml
+- piholecnamerecord_editor_role.yaml
+- piholecnamerecord_viewer_role.yaml
+- piholeaaaarecord_admin_role.yaml
+- piholeaaaarecord_editor_role.yaml
+- piholeaaaarecord_viewer_role.yaml
+- piholearecord_admin_role.yaml
+- piholearecord_editor_role.yaml
+- piholearecord_viewer_role.yaml
 - piholegroup_admin_role.yaml
 - piholegroup_editor_role.yaml
 - piholegroup_viewer_role.yaml
-- piholelocalrecord_admin_role.yaml
-- piholelocalrecord_editor_role.yaml
-- piholelocalrecord_viewer_role.yaml
 - piholedomainlist_admin_role.yaml
 - piholedomainlist_editor_role.yaml
 - piholedomainlist_viewer_role.yaml

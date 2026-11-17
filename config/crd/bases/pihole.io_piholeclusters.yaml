@@ -96,6 +96,13 @@ spec:
                     - Cluster
                     - Local
                     type: string
+                  labels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      labels added to the Service, e.g. svccontroller.k3s.cattle.io/lbpool to pick a
+                      k3s ServiceLB node pool. The operator's own labels win on conflict.
+                    type: object
                   loadBalancerIP:
                     description: loadBalancerIP requests a specific address from the
                       load balancer implementation.
@@ -9101,6 +9108,13 @@ spec:
                     - Cluster
                     - Local
                     type: string
+                  labels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      labels added to the Service, e.g. svccontroller.k3s.cattle.io/lbpool to pick a
+                      k3s ServiceLB node pool. The operator's own labels win on conflict.
+                    type: object
                   loadBalancerIP:
                     description: loadBalancerIP requests a specific address from the
                       load balancer implementation.

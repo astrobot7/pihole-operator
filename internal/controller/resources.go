@@ -286,7 +286,11 @@ func mutateHeadless(svc *corev1.Service, c *piholev1alpha1.PiholeCluster) {
 }
 
 func mutateExposed(svc *corev1.Service, c *piholev1alpha1.PiholeCluster, spec piholev1alpha1.ServiceSpec, ports []corev1.ServicePort) {
-	svc.Labels = commonLabels(c)
+	svc.Labels = maps.Clone(spec.Labels)
+	if svc.Labels == nil {
+		svc.Labels = map[string]string{}
+	}
+	maps.Copy(svc.Labels, commonLabels(c)) // operator labels win
 	svc.Annotations = spec.Annotations
 	svc.Spec.Selector = selectorLabels(c)
 	typ := spec.Type
